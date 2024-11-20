@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Real-Time Chat</title>
+  <style>
+    /* Добавим стили для кнопки удаления */
+    .delete-button {
+      background-color: red;
+      color: red;
+      border: none;
+      padding: 4px 8px;
+      cursor: pointer;
+      margin-left: 10px;
+      font-size: 12px;
+    }
+
+    .delete-button:hover {
+      background-color: darkred;
+    }
+
+    /* Ваши существующие стили */
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      margin: 0;
+      background-color: #f0f0f0;
+    }
+
+    #sidebar {
+      width: 250px;
+      background: #f4f4f4;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #sidebar input,
+    #sidebar button {
+      margin-bottom: 10px;
+      padding: 8px;
+    }
+
+    #chat-name-input {
+      height: 20px; /* Увеличили высоту поля для ввода */
+    }
+
+    #recent-chats,
+    #all-chats {
+      margin-top: 10px;
+      max-height: 470px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 5px;
+      background: #fff;
+    }
+
+    #recent-chats ul,
+    #all-chats ul {
+      list-style-type: none;
+      padding-left: 0;
+    }
+
+    #recent-chats li,
+    #all-chats li {
+      padding: 8px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      justify-content: space-between; /* Сделаем элементы списка более гибкими */
+    }
+
+    #recent-chats li:hover,
+    #all-chats li:hover {
+      background-color: #1652d47e;
+    }
+
+    #chat-container-wrapper {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      margin-left: 10px;
+      margin-right: 10px;
+    }
+
+    #chat-container {
+      flex-grow: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background-color: white;
+      border-radius: 10px;
+      border: 1px solid #130909;
+      margin-bottom: 50px; /* Пространство для поля ввода */
+    }
+
+    #message-form {
+      display: flex;
+      gap: 10px;
+      position: fixed;
+      bottom: 10px;
+      left: 20px;
+      right: 20px;
+      background-color: white;
+      padding: 10px;
+      border-top: 1px solid #ddd;
+      z-index: 10;
+    }
+
+    #message-input {
+      flex-grow: 1;
+      padding: 8px;
+    }
+
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+
+    /* Подсвечиваем выбранный чат */
+    .selected-chat {
+      background-color: lightblue;
+    }
+
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <input id="chat-name-input" type="text" placeholder="Enter chat name..." />
+    <button id="create-chat">Create New Chat</button>
+    <div id="recent-chats">
+      <strong>Recent Chats:</strong>
+      <ul></ul>
+    </div>
+    <div id="all-chats">
+      <strong>All Chats:</strong>
+      <ul></ul>
+    </div>
+    <button id="read-redis-button">Read Redis Data</button>
+  </div>
+
+  <div id="chat-container-wrapper">
+    <div id="chat-container">Выберите чат</div> <!-- Текст по умолчанию -->
+    <form id="message-form">
+      <input type="text" id="message-input" placeholder="Type your message..." required disabled />
+      <button type="submit" disabled>Send</button> <!-- Кнопка изначально неактивна -->
+    </form>
+  </div>
+
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <script>
+    const socket = io("http://localhost:3000");
+    const createChatButton = document.getElementById("create-chat");
+    const chatNameInput = document.getElementById("chat-name-input");
+    const recentChatsList = document.getElementById("recent-chats").querySelector("ul");
+    const allChatsList = document.getElementById("all-chats").querySelector("ul");
+    const chatContainer = document.getElementById("chat-container");
+    const messageForm = document.getElementById("message-form");
+    const messageInput = document.getElementById("message-input");
+    const sendButton = messageForm.querySelector("button");
+    const readRedisButton = document.getElementById("read-redis-button");
+
+    let currentChatId = null;
+    let deletedChatIds = []; // Массив для хранения ID удаленных чатов
+
+    // Создание нового чата
+    createChatButton.addEventListener("click", () => {
+      const chatName = chatNameInput.value.trim();
+      if (!chatName) {
+        alert("Please enter a chat name!");
+        return;
+      }
+      socket.emit("create_chat", chatName);  // Передаем просто строку
+      chatNameInput.value = "";
+    });
+
+    // Обновление списка последних чатов
+    socket.on("recent_chats", (recentChats) => {
+      recentChatsList.innerHTML = "";
+      recentChats.forEach((chat) => {
+        const li = document.createElement("li");
+        li.textContent = `${chat.name}`;
+        li.addEventListener("click", () => switchChat(chat.chatId, li));
+        recentChatsList.appendChild(li);
+      });
+
+      recentChatsList.scrollTop = recentChatsList.scrollHeight;
+    });
+
+    // Обновление списка всех чатов
+    socket.on("all_chats", (allChats) => {
+      allChatsList.innerHTML = "";
+      allChats.forEach((chat) => {
+        const li = document.createElement("li");
+        li.textContent = `${chat.name}`;
+        li.addEventListener("click", () => switchChat(chat.chatId, li));
+
+        // Добавляем кнопку для удаления чата
+        const deleteButton = document.createElement("button");
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", (e) => {
+          e.stopPropagation(); // Чтобы клик по кнопке не вызывал switchChat
+          if (confirm(`Are you sure you want to delete chat "${chat.name}"?`)) {
+            socket.emit("delete_chat", chat.chatId); // Отправляем запрос на удаление чата
+          }
+        });
+        
+        li.appendChild(deleteButton);
+        allChatsList.appendChild(li);
+      });
+
+      allChatsList.scrollTop = allChatsList.scrollHeight;
+    });
+
+    // Переключение чата
+    function switchChat(chatId, listItem) {
+      if (deletedChatIds.includes(chatId)) {
+        alert("Этот чат был удалён.");
+        return;
+      }
+
+      if (currentChatId) {
+        const previousSelected = document.querySelector(".selected-chat");
+        if (previousSelected) {
+          previousSelected.classList.remove("selected-chat");
+        }
+      }
+
+      listItem.classList.add("selected-chat");
+
+      if (currentChatId) socket.emit("leave_chat", { chatId: currentChatId });
+      currentChatId = chatId;
+      chatContainer.innerHTML = "";
+      socket.emit("join_chat", { chatId });
+
+      // Активируем поля для ввода сообщений, если выбран чат
+      messageInput.disabled = false;
+      sendButton.disabled = false;
+    }
+
+    // Обработка истории чата
+    socket.on("chat_history", (messages) => {
+    console.log("История чата получена:", messages);
+    chatContainer.innerHTML = ""; // Очистка контейнера
+    messages.forEach((msg) => {
+      console.log("Обрабатываемое сообщение:", msg);
+      const parsedMsg = typeof msg === "string" ? JSON.parse(msg) : msg;
+      addMessageToUI(parsedMsg.sender, parsedMsg.message, new Date(parsedMsg.timestamp));
+    });
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  });
+
+
+    // Добавление сообщения в UI
+    function addMessageToUI(sender, message, timestamp) {
+      const div = document.createElement("div");
+      div.innerHTML = `<strong>${sender}:</strong> ${message} <small>(${timestamp.toLocaleTimeString()})</small>`;
+      chatContainer.appendChild(div);
+    }
+
+    // Отправка сообщения
+    messageForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (currentChatId) {
+        const message = messageInput.value;
+        socket.emit("send_message", { chatId: currentChatId, sender: "User", message });
+        messageInput.value = "";
+      }
+    });
+
+    // При получении нового сообщения от сервера
+    socket.on("new_message", (data) => {
+      addMessageToUI(data.sender, data.message, new Date(data.timestamp));
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    });
+
+    // При подключении обновляем списки чатов
+    socket.emit("get_recent_chats");
+    socket.emit("get_all_chats");
+
+    // При клике на кнопку вызываем запрос на сервер для получения данных из Redis
+    readRedisButton.addEventListener("click", () => {
+      socket.emit("read_redis");
+    });
+
+    // При удалении чата обновляем список чатов и блокируем доступ к сообщению
+    socket.on("chat_deleted", ({ chatId }) => {
+      console.log(`Чат с ID ${chatId} был удалён`);
+      // Сохраняем удаленный чат
+      deletedChatIds.push(chatId);
+      // После удаления чата сбрасываем текущий чат
+      currentChatId = null;
+      chatContainer.innerHTML = "Выберите чат"; // Показываем сообщение
+
+      // Блокируем доступ к отправке сообщений
+      messageInput.disabled = true;
+      sendButton.disabled = true;
+
+      // Запрашиваем обновлённые списки чатов
+      socket.emit("get_all_chats");
+      socket.emit("get_recent_chats");
+    });
+  </script>
+</body>
+</html>
