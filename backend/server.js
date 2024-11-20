@@ -217,9 +217,12 @@ io.on("connection", (socket) => {
     if (!existsInRedis) {
       console.log(`История чата ${chatId} отсутствует в Redis. Загружаем из MongoDB...`);
       const chat = await Chat.findOne({ chatId });
-      if (chat && chat.messages) {
+      if (chat && Array.isArray(chat.messages) && chat.messages.length > 0) {
         const messagesFromMongo = chat.messages.map((msg) => JSON.stringify(msg));
         await redis.rpush(`chat:${chatId}`, ...messagesFromMongo); // Загружаем историю в Redis
+        console.log(`История чата ${chatId} успешно загружена из MongoDB в Redis.`);
+      } else {
+        console.log(`Чат ${chatId} найден в MongoDB, но сообщений нет.`);
       }
     }
   
@@ -257,6 +260,7 @@ io.on("connection", (socket) => {
   
     io.emit("recent_chats", recentChats);
   });
+  
   
   
 
